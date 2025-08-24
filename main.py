@@ -13,6 +13,16 @@ import json
 import os
 import asyncio
 
+# ----- Настройка логирования -----
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot.log'),
+        logging.StreamHandler()
+    ]
+)
+
 # ----- Все переменные с данными -----
 BOT_TOKEN = os.environ.get('BOT_TOKEN', "7804555297:AAH7YFsNeJeSo5-fyVWybbAjut6VSnF96Sw")
 GOOGLE_SHEETS_KEY = os.environ.get('GOOGLE_SHEETS_KEY', "1-JuXg-pAX1Ts-fNWE0P8V8ktAf6kcYa8wTkij9kEGYQ")
@@ -57,16 +67,6 @@ RESTAURANTS = [
 
 CHAT_ID = os.environ.get('CHAT_ID', "-1002709942333")
 
-# ----- Логирование -----
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log'),
-        logging.StreamHandler()
-    ]
-)
-
 # ----- Selenium options -----
 chrome_options = Options()
 chrome_options.add_argument("--headless")
@@ -74,16 +74,29 @@ chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--window-size=1920,1080")
+chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
 def setup_google_sheets():
     """Настройка подключения к Google Sheets"""
     try:
-        service_account_json = os.environ.get('SERVICE_ACCOUNT_JSON')
-        if not service_account_json:
-            logging.error("❌ SERVICE_ACCOUNT_JSON not found in environment variables")
-            return None
-            
-        service_account_info = json.loads(service_account_json)
+        logging.info("🔄 Начинаю подключение к Google Sheets...")
+        
+        # Пробуем прочитать из файла (для локального тестирования)
+        try:
+            with open('service_account.json', 'r') as f:
+                service_account_info = json.load(f)
+            logging.info("✅ JSON ключ загружен из файла service_account.json")
+        except FileNotFoundError:
+            # Если файла нет, пробуем из переменной окружения (для Railway)
+            service_account_json = os.environ.get('SERVICE_ACCOUNT_JSON')
+            if not service_account_json:
+                logging.error("❌ SERVICE_ACCOUNT_JSON not found in environment variables")
+                return None
+            service_account_info = json.loads(service_account_json)
+            logging.info("✅ JSON ключ загружен из переменной окружения")
+        
+        logging.info(f"🔑 Сервисный аккаунт: {service_account_info['client_email']}")
+        
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         
         creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
@@ -171,13 +184,13 @@ def get_cashbox_data(restaurant):
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     
     try:
-        logging.info(f"[{restaurant['name']}] Начинаю обработку...")
+        logging.info(f"[{restaurant['name']}] 🚀 Начинаю обработку...")
         
         # Авторизация
         if not login(driver, restaurant["login_key"]):
             return None, "Ошибка авторизации"
         
-        logging.info(f"[{restaurant['name']}] Вход выполнен, нахожусь на странице отчета.")
+        logging.info(f"[{restaurant['name']}] ✅ Вход выполнен")
         
         # Переход к ресторану
         for attempt in range(3):
@@ -219,17 +232,17 @@ def get_cashbox_data(restaurant):
         
         # Получение итоговой суммы
         income = driver.find_element(By.CSS_SELECTOR, ".large_cash b").text.strip()
-        logging.info(f"[{restaurant['name']}] Найдена сумма: {income}")
+        logging.info(f"[{restaurant['name']}] 💰 Найдена сумма: {income}")
         
         return income, None
         
     except Exception as e:
-        logging.error(f"❌ Ошибка в {restaurant['name']}: {str(e)}")
+        logging.error(f"[{restaurant['name']}] ❌ Ошибка: {str(e)}")
         return None, str(e)
         
     finally:
         driver.quit()
-        logging.info(f"[{restaurant['name']}] Завершил работу. Выхожу из системы...")
+        logging.info(f"[{restaurant['name']}] 🏁 Завершил работу")
 
 async def send_to_telegram():
     """Основная функция отправки данных"""
@@ -238,7 +251,7 @@ async def send_to_telegram():
         tz = timezone(timedelta(hours=5))
         yesterday = (datetime.now(tz) - timedelta(days=1)).strftime("%d.%m.%Y")
         
-        logging.info("🚀 Запуск бота для получения данных...")
+        logging.info(f"📅 Работаю с датой: {yesterday}")
         
         # Настройка Google Sheets
         worksheet = setup_google_sheets()
@@ -262,7 +275,7 @@ async def send_to_telegram():
             else:
                 formatted_income = format_amount(income)
                 message = f"✅ Савдо: {yesterday}\n{restaurant['name']}\n\nСумма: {formatted_income}"
-                logging.info(f"Успешно: {restaurant['name']} - {formatted_income}")
+                logging.info(f"✅ Успешно: {restaurant['name']} - {formatted_income}")
             
             # Отправка в Telegram
             try:
@@ -295,7 +308,7 @@ async def send_to_telegram():
         
         # Итоговый отчет
         logging.info("=" * 50)
-        logging.info("ИТОГ ВЫПОЛНЕНИЯ:")
+        logging.info("📊 ИТОГ ВЫПОЛНЕНИЯ:")
         for result in results:
             logging.info(result)
         logging.info("=" * 50)
@@ -304,6 +317,12 @@ async def send_to_telegram():
         logging.error(f"❌ Критическая ошибка в основной функции: {str(e)}")
 
 if __name__ == "__main__":
-    logging.info("🚀 Запуск бота...")
+    logging.info("=" * 60)
+    logging.info("🚀 ЗАПУСК БОТА ДЛЯ СБОРА ДАННЫХ")
+    logging.info("=" * 60)
+    
     asyncio.run(send_to_telegram())
-    logging.info("🏁 Завершение работы бота")
+    
+    logging.info("=" * 60)
+    logging.info("🏁 РАБОТА БОТА ЗАВЕРШЕНА")
+    logging.info("=" * 60)
