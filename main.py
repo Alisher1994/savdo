@@ -74,14 +74,13 @@ chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--window-size=1920,1080")
-chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
 def setup_google_sheets():
     """Настройка подключения к Google Sheets"""
     try:
         service_account_json = os.environ.get('SERVICE_ACCOUNT_JSON')
         if not service_account_json:
-            logging.error("SERVICE_ACCOUNT_JSON not found in environment variables")
+            logging.error("❌ SERVICE_ACCOUNT_JSON not found in environment variables")
             return None
             
         service_account_info = json.loads(service_account_json)
@@ -107,8 +106,8 @@ def write_to_google_sheets(worksheet, date, restaurant_name, amount):
             logging.warning(f"Пустая сумма для {restaurant_name}, пропускаем запись")
             return False
             
-        # Очистка суммы: убираем пробелы и заменяем запятые на точки
-        clean_amount = amount.replace(" ", "").replace(",", ".")
+        # Очистка суммы: убираем пробелы
+        clean_amount = amount.replace(" ", "")
         
         # Проверяем, что это число
         try:
@@ -172,9 +171,13 @@ def get_cashbox_data(restaurant):
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     
     try:
+        logging.info(f"[{restaurant['name']}] Начинаю обработку...")
+        
         # Авторизация
         if not login(driver, restaurant["login_key"]):
             return None, "Ошибка авторизации"
+        
+        logging.info(f"[{restaurant['name']}] Вход выполнен, нахожусь на странице отчета.")
         
         # Переход к ресторану
         for attempt in range(3):
@@ -216,21 +219,7 @@ def get_cashbox_data(restaurant):
         
         # Получение итоговой суммы
         income = driver.find_element(By.CSS_SELECTOR, ".large_cash b").text.strip()
-        
-        # Проверка актуальности данных
-        try:
-            last_updated = driver.find_element(By.CSS_SELECTOR, ".widget_last_updated i").text.replace("Обновлено в: ", "").strip()
-            last_updated_time = datetime.strptime(last_updated, "%H:%M").replace(
-                year=datetime.now(timezone(timedelta(hours=5))).year,
-                month=datetime.now(timezone(timedelta(hours=5))).month,
-                day=datetime.now(timezone(timedelta(hours=5))).day
-            )
-            
-            if last_updated_time.date() < datetime.now(timezone(timedelta(hours=5))).date():
-                return None, "Данные устарели"
-                
-        except Exception as time_error:
-            logging.warning(f"Не удалось проверить время обновления: {time_error}")
+        logging.info(f"[{restaurant['name']}] Найдена сумма: {income}")
         
         return income, None
         
@@ -240,6 +229,7 @@ def get_cashbox_data(restaurant):
         
     finally:
         driver.quit()
+        logging.info(f"[{restaurant['name']}] Завершил работу. Выхожу из системы...")
 
 async def send_to_telegram():
     """Основная функция отправки данных"""
@@ -248,10 +238,14 @@ async def send_to_telegram():
         tz = timezone(timedelta(hours=5))
         yesterday = (datetime.now(tz) - timedelta(days=1)).strftime("%d.%m.%Y")
         
+        logging.info("🚀 Запуск бота для получения данных...")
+        
         # Настройка Google Sheets
         worksheet = setup_google_sheets()
         if not worksheet:
-            logging.error("Не удалось подключиться к Google Sheets, продолжаем без записи")
+            logging.error("❌ Не удалось подключиться к Google Sheets, продолжаем без записи")
+        else:
+            logging.info("✅ Google Sheets подключен успешно")
         
         results = []
         
@@ -275,8 +269,7 @@ async def send_to_telegram():
                 await bot.send_message(
                     chat_id=CHAT_ID,
                     text=message,
-                    message_thread_id=message_thread_id,
-                    parse_mode='HTML'
+                    message_thread_id=message_thread_id
                 )
                 logging.info(f"📨 Сообщение отправлено в Telegram для {restaurant['name']}")
             except Exception as e:
@@ -291,11 +284,11 @@ async def send_to_telegram():
                     income
                 )
                 if success:
-                    results.append(f"✅ {restaurant['name']}: {formatted_income}")
+                    results.append(f"✅ {restaurant['name']}: {formatted_income} (записано в Sheets)")
                 else:
-                    results.append(f"❌ {restaurant['name']}: ошибка записи")
+                    results.append(f"❌ {restaurant['name']}: ошибка записи в Sheets")
             else:
-                results.append(f"⚠️ {restaurant['name']}: нет данных")
+                results.append(f"⚠️ {restaurant['name']}: нет данных для записи")
             
             # Пауза между запросами
             time.sleep(2)
